@@ -76,6 +76,30 @@ def _check_sgl_kernel() -> tuple[str, str]:
     return _OK, f"sgl_kernel built for {', '.join(targets)}"
 
 
+def _check_gptq_kernel() -> tuple[str, str]:
+    """Report whether this kernel can actually run 4-bit GPTQ.
+
+    Upstream removed the AoT GPTQ tree after v0.5.19, so a kernel built from a
+    newer ref has no ``gptq_*`` ops at all -- while docs/qwen3.8-27b.md
+    recommends the GPTQ checkpoint as the fastest configuration. Doctor reported
+    "255 model architectures registered" and looked entirely healthy; the
+    absence only showed up on the first token, as
+    ``AttributeError: 'sgl_kernel' object has no attribute 'gptq_shuffle'``.
+    """
+    try:
+        import sgl_kernel
+    except Exception:
+        return _WARN, "gptq support unknown (sgl_kernel not importable)"
+
+    absent = [n for n in ("gptq_shuffle", "gptq_gemm") if not hasattr(sgl_kernel, n)]
+    if absent:
+        return _WARN, (
+            f"no gptq ops ({', '.join(absent)}) -- 4-bit GPTQ models will fail. "
+            "Build the kernel from an SGLang checkout of v0.5.19, or serve BF16"
+        )
+    return _OK, "gptq ops present (4-bit GPTQ can run)"
+
+
 def _check_sglang_import() -> tuple[str, str]:
     """Catch a `sglang/` directory in the cwd shadowing the real package.
 
@@ -239,6 +263,7 @@ def cmd_doctor(_args) -> int:
     results = (
         _check_sglang_import(),
         _check_sgl_kernel(),
+        _check_gptq_kernel(),
         _check_platform(),
         _check_serve_imports(),
         _check_diffusion_platform(),

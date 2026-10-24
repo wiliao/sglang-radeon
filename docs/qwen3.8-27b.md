@@ -210,3 +210,11 @@ Note this is weight-only quantization — activations stay 16-bit, which is what
 you want on RDNA3 since there is no native FP8. Avoid the `quark`/MXFP4 paths;
 they need CDNA-only aiter kernels and this plugin stubs them out precisely
 because they cannot work here.
+
+> **The published image cannot run GPTQ.** It is built from `SGLANG_REF=main`,
+> and upstream deleted `csrc/gemm/gptq/` after v0.5.19 — so that kernel has no
+> `gptq_*` ops and every request fails with
+> `AttributeError: 'sgl_kernel' object has no attribute 'gptq_shuffle'`. Verify
+> with `sglang-rdna3 doctor`, which now reports gptq support explicitly; if it
+> says the ops are absent, build an image with `SGLANG_REF=v0.5.19`, or serve
+> BF16 (which needs ~55 GB and therefore TP2 on 48 GB cards).
