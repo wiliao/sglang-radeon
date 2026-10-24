@@ -100,6 +100,11 @@ python -m sglang.launch_server \
 
 `sglang-rdna3 serve-args <model>` prints a command tuned to the GPUs it finds.
 
+Two 24 GB cards (48 GB total) cannot hold this model in BF16, so a quantised
+checkpoint is required. [docs/qwen3.8-27b-dual-xtx.md](docs/qwen3.8-27b-dual-xtx.md)
+covers that case with measured numbers: GPTQ-Int4 at 196,608 context, the five
+flags that are not optional, and why the FP8 path is not available here at all.
+
 ## What `doctor` tells you
 
 ```

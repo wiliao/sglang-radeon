@@ -3,6 +3,11 @@
 End-to-end walkthrough for the model this project was validated against.
 Everything below was run on 2× W7900 (gfx1100, 48 GB each), ROCm 7.2.1.
 
+> **Two 24 GB cards instead of one 48 GB card?** The budget changes completely:
+> BF16 no longer fits, and the deployment uses GPTQ-Int4 at 192k with a
+> different set of required flags. See
+> [qwen3.8-27b-dual-xtx.md](qwen3.8-27b-dual-xtx.md).
+
 ## About the model
 
 Qwen3.8-27B is a dense **vision-language** model with a hybrid attention
