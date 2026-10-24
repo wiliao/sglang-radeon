@@ -8,6 +8,7 @@ corresponding shim becomes a no-op and can be deleted.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
 import types
@@ -872,6 +873,62 @@ def _enable_hybrid_window_h3_on_rocm() -> str:
     return "applied"
 
 
+def _patch_ollama_show_name() -> str:
+    """Let ``/api/show`` accept the field name Ollama clients actually send.
+
+    ``OllamaShowRequest`` declares one field::
+
+        class OllamaShowRequest(BaseModel):
+            model: str
+
+    but the Ollama wire protocol sends ``{"name": ...}``, and clients written
+    against real Ollama send exactly that. The body is validated before the
+    handler runs, so the call dies with::
+
+        1 validation error for OllamaShowRequest
+        model  Field required  [input_value={'name': 'qwen3.8-27b'}]
+
+    The failed call is not the damage. An Ollama-aware client identifies the
+    server by POSTing ``/api/tags`` first, and SGLang answers that with a model
+    list, so the client concludes "ollama" and then inspects the model with
+    ``name``. A 400 there means it never receives the context length that
+    ``/api/show`` reports, and silently falls back to its own default window --
+    64k in the Hermes Agent case, against a server configured for 192k. Chat
+    keeps working, so nothing looks broken.
+
+    Alias the field rather than renaming it: callers that send ``model`` keep
+    working, and the response shape is untouched.
+    """
+    try:
+        protocol = importlib.import_module(
+            "sglang.srt.entrypoints.ollama.protocol"
+        )
+    except Exception:
+        return "skipped (sglang Ollama entrypoint not importable)"
+
+    request = getattr(protocol, "OllamaShowRequest", None)
+    if request is None or not hasattr(request, "model_fields"):
+        return "not needed (no OllamaShowRequest in this sglang)"
+
+    field = request.model_fields.get("model")
+    if field is None:
+        return "not needed (OllamaShowRequest has no 'model' field)"
+    if field.validation_alias is not None and "name" in str(field.validation_alias):
+        return "already applied"
+
+    try:
+        from pydantic import AliasChoices
+    except Exception:
+        return "skipped (pydantic not importable)"
+
+    field.validation_alias = AliasChoices("model", "name")
+    try:
+        request.model_rebuild(force=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        return f"FAILED: {exc}"
+    return "applied (accepts 'model' and 'name')"
+
+
 #: ``(name, function, deferrable)``.
 #:
 #: *deferrable* marks a shim whose target lives inside SGLang itself. Those
@@ -888,6 +945,7 @@ _SHIMS = (
     ("nested_weight_detection", _patch_nested_weight_detection, True),
     ("h3_denoise_platform_gate", _patch_h3_denoise_platform_gate, True),
     ("lora_quant_method", _patch_lora_quant_method_delegation, True),
+    ("ollama_show_name_alias", _patch_ollama_show_name, True),
     ("custom_all_reduce", _decline_custom_all_reduce, True),
     ("decline_cuda_only_jit_kernels", _decline_cuda_only_jit_kernels, True),
     ("ptx_primitives", _patch_ptx_primitives, True),

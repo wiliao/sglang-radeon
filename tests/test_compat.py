@@ -378,3 +378,40 @@ def test_custom_all_reduce_is_left_alone_on_cdna(monkeypatch):
         lambda: [hardware.GpuInfo(0, "gfx942", "MI300X", 192.0, 304)],
     )
     assert compat._decline_custom_all_reduce().startswith("not needed")
+
+
+def test_ollama_show_name_alias(monkeypatch):
+    """`/api/show` must accept `name`, not only `model`.
+
+    Ollama's protocol sends {"name": ...}, and clients that speak it (Hermes
+    Agent does) identify this server as Ollama via /api/tags, then inspect the
+    model with `name`. A 400 there costs them the context length, so they fall
+    back to their own default window while the server holds 192k.
+    """
+    pydantic = pytest.importorskip("pydantic")
+
+    class OllamaShowRequest(pydantic.BaseModel):
+        model: str
+
+    for name in ("sglang", "sglang.srt", "sglang.srt.entrypoints",
+                 "sglang.srt.entrypoints.ollama"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    protocol = types.ModuleType("sglang.srt.entrypoints.ollama.protocol")
+    protocol.OllamaShowRequest = OllamaShowRequest
+    monkeypatch.setitem(
+        sys.modules, "sglang.srt.entrypoints.ollama.protocol", protocol
+    )
+
+    assert compat._patch_ollama_show_name().startswith("applied")
+    assert OllamaShowRequest.model_validate({"name": "qwen3.8-27b"}).model == "qwen3.8-27b"
+    assert OllamaShowRequest.model_validate({"model": "qwen3.8-27b"}).model == "qwen3.8-27b"
+    # Re-running must not stack a second alias on top of the first.
+    assert compat._patch_ollama_show_name().startswith("already applied")
+
+
+def test_ollama_show_name_alias_when_sglang_absent(monkeypatch):
+    """A missing Ollama entrypoint is a skip, not a crash."""
+    for name in [n for n in list(sys.modules) if n.startswith("sglang")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "sglang.srt.entrypoints.ollama.protocol", None)
+    assert compat._patch_ollama_show_name().startswith("skipped")
