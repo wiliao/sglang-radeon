@@ -164,8 +164,16 @@ except Exception:
 PY
 )
 read -r TORCH_VER TORCH_HIP <<<"$TORCH_INFO"
-[ "$TORCH_VER" = "MISSING" ] && die "PyTorch not installed. Install a ROCm build first:
-    pip install torch --index-url https://download.pytorch.org/whl/rocm7.0"
+# The prebuilt kernel wheel is built against torch 2.9.1. torch 2.13 and 2.14 no
+# longer export c10::hip::getCurrentHIPStream, and the wheel references it, so
+# on those versions the kernel fails with "undefined symbol" -- which surfaces
+# only as four registered architectures and a red doctor, long after this point.
+[ "$TORCH_VER" = "MISSING" ] && die "PyTorch not installed. The prebuilt gfx1100 kernel needs
+  torch 2.9.1 (torch 2.13/2.14 dropped a symbol it imports). Install one first:
+    pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/rocm6.4
+  or start from rocm/pytorch:rocm7.2.1_ubuntu24.04_py3.12_pytorch_release_2.9.1,
+  or skip the prebuilt kernel and build against your torch:
+    sglang-rdna3 build-kernel --sglang-src <sglang checkout> --install"
 [ "$TORCH_HIP" = "NOHIP" ] && die "PyTorch $TORCH_VER is a CUDA build, not ROCm.
   Reinstall from https://download.pytorch.org/whl/rocmX.Y before continuing."
 ok "PyTorch $TORCH_VER (HIP $TORCH_HIP)"
@@ -368,6 +376,30 @@ step "Building sgl-kernel for $GFX (a few minutes)"
 else
   warn "skipping kernel build: expect very few model architectures to register"
 fi
+
+# --------------------------------------------------------------------------
+step "Verifying the kernel"
+# --------------------------------------------------------------------------
+# A wrong-torch kernel does not announce itself: the import fails, sglang then
+# registers a handful of architectures instead of hundreds, and the server looks
+# alive while no model can load.
+KERNEL_STATE=$(python3 - <<'PY' 2>/dev/null || true
+try:
+    import sgl_kernel  # noqa: F401
+    print("ok")
+except Exception as exc:
+    print("abi" if "getCurrentHIPStream" in str(exc) else "broken")
+PY
+)
+case "$KERNEL_STATE" in
+  ok) ok "sgl_kernel imports" ;;
+  abi) die "sgl_kernel cannot load: torch ABI mismatch.
+  It was built against torch 2.9.1; torch 2.13+ stopped exporting
+  c10::hip::getCurrentHIPStream, so its symbols do not resolve.
+  Install torch 2.9.1, or rebuild against the torch you have:
+      sglang-rdna3 build-kernel --sglang-src <sglang checkout> --install" ;;
+  *) warn "sgl_kernel did not import; doctor below shows the detail" ;;
+esac
 
 # --------------------------------------------------------------------------
 step "Verifying"
