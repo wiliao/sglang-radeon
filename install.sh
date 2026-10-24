@@ -321,6 +321,12 @@ pip install --no-deps --no-build-isolation -q -r "$WORKDIR/deps.txt"
 # CUDA-specific.
 pip install --no-deps -q "huggingface_hub>=1.0,<2.0" apache-tvm-ffi==0.1.11 kernels_data
 
+# --no-deps also skips *transitive* requirements, and the short list above goes
+# stale (a fresh venv was missing 69 distributions, starting with urllib3 and
+# httpx). Derive the rest from the installed metadata instead of guessing.
+python3 "$PLUGIN_DIR/scripts/fill_missing_deps.py" -q \
+  || warn "could not complete second-order requirements; see doctor output"
+
 # SGLang-Diffusion detects ROCm by probing through amdsmi, and falls back to
 # CpuPlatform when that import fails -- a diffusion runtime that believes it
 # is on a CPU while sitting on a working GPU. ROCm ships the bindings; they
